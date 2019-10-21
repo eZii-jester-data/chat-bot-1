@@ -32,7 +32,7 @@ bot = nil
   #     "Test-Bot-For-Implementing-Single-Usecase [Case: #1]",
   #     "MANUEL ARNO KORFMANN SIGNATURE",
   #     TEST____ONLY____FETCHING_5_RESULTS_FROM_OTHER_BOT_USING_STATIC_QUERY,
-      TEST_COMMAND_STRING = "5 results for test",
+      TEST_COMMAND_STRING = "5 results for test"
   #     ERR_CODE_0 = "search string for gbot is not a string",
   #     ERR_CODE_1 = "respoonse not delivered within 1 second",
 
@@ -58,7 +58,7 @@ bot = nil
   # §(TEST____ONLY____FETCHING_5_RESULTS_FROM_OTHER_BOT_USING_STATIC_QUERY) do
     
   #   MESSAGE = "gbot test | filter by google page speed score | top 1"
-    MESSAGE = "gbot test | filter by google page speed score | top 1"
+    MESSAGE = "gbot: #{TEST_COMMAND_STRING} | filter by google page speed score | top 1"
   # end
 
 
@@ -94,6 +94,35 @@ bot = nil
 
 
 
+# §(ONLY_SAVE_STATE_VIA_ONE_IVAR: :@queue, QUEUE_IMPLEMENTATION) do
+  class Pipeline
+    def initialize
+      @queue = []
+    end
+
+    def add(execute)
+      # §(USE_PUSH_OVER_UNSHIFT_FOR: QUEUE_IMPLEEMENTATION)
+        @queue.push(execute)
+     # end
+    end
+
+    def run
+      last_item = nil
+      while @queue.any?
+        last_item = yield(@queue.shift, @queue.size)
+      end
+    end
+
+    def inspect
+      """
+        First run command #{@queue[0]}
+        Second run command #{@queue[1]}
+        Third run command #{@queue[2]}
+      """
+    end
+  end
+# end
+
 bot = Discordrb::Bot.new token: ENV['BOT_TOKEN']
 
 bot.message(with_text: 'pipeline:') do |event|
@@ -105,7 +134,30 @@ bot.message(with_text: 'pipeline:') do |event|
 
     event.respond pipe_parts.inspect
 
+    pipeline = Pipeline.new
     pipe_parts.each do |pipe_part| pipeline.add(pipe_part) end
+
+    event.respond(pipeline.inspect)
+
+    pipeline.run { |message, left_commands_count|
+      event.respond("Commands to be run after this one: #{left_commands_count}, now running:")
+
+      # command = CommandChooser.new(message).command
+
+      # command.timed do
+        event.respond(message) # if command.bot_2_bot?
+
+
+        # if command.requires_gbot_answer_command?
+            # until next_message_is_gbot_answer_limited_to_1_via_50_MILLISECOND_DEBOUNCE_INTO_THE_PAST_AND_FUTURE
+                get_gbot_message
+            # end
+        # end
+      # end
+
+
+
+    }
 end
 
 bot.run
@@ -117,22 +169,6 @@ bot.run
 
 
 
-# class Pipeline
-#   def initialize
-#     @queue = []
-#   end
-
-#   def add(execute)
-#     @queue.unshift(execute)
-#   end
-
-#   def run
-#     last_item = nil
-#     while @queue.still_items?
-#       last_item = @queue.shift.do(last_item)
-#     end
-#   end
-# end
 
 
 # module SendMessageAndProcessBotResponseWithin5Seconds
