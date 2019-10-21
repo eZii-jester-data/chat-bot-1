@@ -9,7 +9,9 @@ TEST____ONLY____FETCHING_5_RESULTS_FROM_OTHER_BOT_USING_STATIC_QUERY = 0
 LAW_SET = [
   "Test-Bot-For-Implementing-Single-Usecase [Case: #1]",
   "MANUEL ARNO KORFMANN SIGNATURE",
-  TEST____ONLY____FETCHING_5_RESULTS_FROM_OTHER_BOT_USING_STATIC_QUERY
+  TEST____ONLY____FETCHING_5_RESULTS_FROM_OTHER_BOT_USING_STATIC_QUERY,
+  TEST_COMMAND_STRING = "5 results for test",
+  ERR_CODE_0 = "search string for gbot is not a string"
 ]
 
 # TEST____ONLY____FETCHING_5_RESULTS_FROM_OTHER_BOT_USING_STATIC_QUERY = 0
@@ -18,7 +20,19 @@ LAW_SET = [
 # Manuel Arno Korfmann signature §set = law set = testing discord bots for communicating wiith other bots
 
 
+
 §(TEST____ONLY____FETCHING_5_RESULTS_FROM_OTHER_BOT_USING_STATIC_QUERY) do
+  
+  class GbotCommandForBot2Bot
+    def initialize(text)
+      @text = text
+    end
+    
+    def to_discord_message
+      fail "ERR_CODE: 0" if @text.is_a?(String).false?
+      @text.to_s
+    end
+  end
 
   require 'discordrb'
 
@@ -26,10 +40,12 @@ LAW_SET = [
   listening_bot = Discordrb::Bot.new token: ENV['BOT_TOKEN']
 
 
-  bot = Discordrb::Commands::CommandBot.new token: ENV['BOT_TOKEN'], prefix: '!'
+  bot = Discordrb::Commands::CommandBot.new token: ENV['BOT_TOKEN'], prefix: '!' do
 
     bot.command :"gbot:" do |event|
-      return event.user.name
+      # return event.user.name
+      
+      return GbotCommandForBot2Bot.new(TEST_COMMAND_STRING).to_discord_message
     
     
       pipe_parts = split_into_pipe_parts(message, '|')
