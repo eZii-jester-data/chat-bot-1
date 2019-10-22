@@ -460,9 +460,15 @@ module EZIIDiscordIntegration
     def pump_once(discord_listener, &block)
       count = 0
       self.pump(discord_listener) do
-        fail if count > 0
-        block.call
-        count += 1
+        @stop_ladder = true if count > 0 
+        
+        
+        if @stop_ladder
+          ladder(stop: @ladder_1)
+        else  
+          block.call
+          count += 1
+        end
       end
     end
     
@@ -474,8 +480,8 @@ module EZIIDiscordIntegration
     
       message = nil
       messages_by_gbot_in_timeframe = 0
-      ladder do |message_data|
-        
+      @ladder_1 = ladder do |message_data|
+ 
         puts message_data.inspect
     
         puts ALL_FALSE_INSPECT(

@@ -1,8 +1,8 @@
 GIT
   remote: https://github.com/eZii-jester-data/ladder-gem.git
-  revision: 05b01d0acd7bb1486c0443627290cb16362085a6
+  revision: 5360adaacd23549ef7cc8bdbcd43b48a5dce2d2f
   specs:
-    ladder (3.test)
+    ladder (5.test)
 
 GEM
   specs:
