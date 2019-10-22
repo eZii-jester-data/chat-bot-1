@@ -1,4 +1,353 @@
 require 'ladder'
+require 'discordrb'
+
+
+def monkeypatching
+  yield
+end
+
+monkeypatching do
+module Discordrb
+  # Represents a Discord bot, including servers, users, etc.
+  class Bot
+
+def handle_dispatch(type, data)
+     # Check whether there are still unavailable servers and there have been more than 10 seconds since READY
+     if @unavailable_servers && @unavailable_servers > 0 && (Time.now - @unavailable_timeout_time) > 10
+       # The server streaming timed out!
+       LOGGER.debug("Server streaming timed out with #{@unavailable_servers} servers remaining")
+       LOGGER.debug('Calling ready now because server loading is taking a long time. Servers may be unavailable due to an outage, or your bot is on very large servers.')
+
+       # Unset the unavailable server count so this doesn't get triggered again
+       @unavailable_servers = 0
+
+       notify_ready
+     end
+
+     case type
+     when :READY
+       # As READY may be called multiple times over a single process lifetime, we here need to reset the cache entirely
+       # to prevent possible inconsistencies, like objects referencing old versions of other objects which have been
+       # replaced.
+       init_cache
+
+       @profile = Profile.new(data['user'], self)
+
+       # Initialize servers
+       @servers = {}
+
+       # Count unavailable servers
+       @unavailable_servers = 0
+
+       data['guilds'].each do |element|
+         # Check for true specifically because unavailable=false indicates that a previously unavailable server has
+         # come online
+         if element['unavailable'].is_a? TrueClass
+           @unavailable_servers += 1
+
+           # Ignore any unavailable servers
+           next
+         end
+
+         ensure_server(element)
+       end
+
+       # Add PM and group channels
+       data['private_channels'].each do |element|
+         channel = ensure_channel(element)
+         if channel.pm?
+           @pm_channels[channel.recipient.id] = channel
+         else
+           @channels[channel.id] = channel
+         end
+       end
+
+       # Don't notify yet if there are unavailable servers because they need to get available before the bot truly has
+       # all the data
+       if @unavailable_servers.zero?
+         # No unavailable servers - we're ready!
+         notify_ready
+       end
+
+       @ready_time = Time.now
+       @unavailable_timeout_time = Time.now
+     when :GUILD_MEMBERS_CHUNK
+       id = data['guild_id'].to_i
+       server = server(id)
+       server.process_chunk(data['members'])
+     when :MESSAGE_CREATE
+       
+       ladder(data)
+       
+       
+       if ignored?(data['author']['id'].to_i)
+         debug("Ignored author with ID #{data['author']['id']}")
+         return
+       end
+
+       if @ignore_bots && data['author']['bot']
+         debug("Ignored Bot account with ID #{data['author']['id']}")
+         return
+       end
+
+       # If create_message is overwritten with a method that returns the parsed message, use that instead, so we don't
+       # parse the message twice (which is just thrown away performance)
+       message = create_message(data)
+       message = Message.new(data, self) unless message.is_a? Message
+
+       return if message.from_bot? && !should_parse_self
+
+       event = MessageEvent.new(message, self)
+       raise_event(event)
+
+       if message.mentions.any? { |user| user.id == @profile.id }
+         event = MentionEvent.new(message, self)
+         raise_event(event)
+       end
+
+       if message.channel.private?
+         event = PrivateMessageEvent.new(message, self)
+         raise_event(event)
+       end
+     when :MESSAGE_UPDATE
+       update_message(data)
+
+       message = Message.new(data, self)
+       return if message.from_bot? && !should_parse_self
+
+       unless message.author
+         LOGGER.debug("Edited a message with nil author! Content: #{message.content.inspect}, channel: #{message.channel.inspect}")
+         return
+       end
+
+       event = MessageEditEvent.new(message, self)
+       raise_event(event)
+     when :MESSAGE_DELETE
+       delete_message(data)
+
+       event = MessageDeleteEvent.new(data, self)
+       raise_event(event)
+     when :MESSAGE_DELETE_BULK
+       debug("MESSAGE_DELETE_BULK will raise #{data['ids'].length} events")
+
+       data['ids'].each do |single_id|
+         # Form a data hash for a single ID so the methods get what they want
+         single_data = {
+           'id' => single_id,
+           'channel_id' => data['channel_id']
+         }
+
+         # Raise as normal
+         delete_message(single_data)
+
+         event = MessageDeleteEvent.new(single_data, self)
+         raise_event(event)
+       end
+     when :TYPING_START
+       start_typing(data)
+
+       begin
+         event = TypingEvent.new(data, self)
+         raise_event(event)
+       rescue Discordrb::Errors::NoPermission
+         debug 'Typing started in channel the bot has no access to, ignoring'
+       end
+     when :MESSAGE_REACTION_ADD
+       add_message_reaction(data)
+
+       return if profile.id == data['user_id'].to_i && !should_parse_self
+
+       event = ReactionAddEvent.new(data, self)
+       raise_event(event)
+     when :MESSAGE_REACTION_REMOVE
+       remove_message_reaction(data)
+
+       return if profile.id == data['user_id'].to_i && !should_parse_self
+
+       event = ReactionRemoveEvent.new(data, self)
+       raise_event(event)
+     when :MESSAGE_REACTION_REMOVE_ALL
+       remove_all_message_reactions(data)
+
+       event = ReactionRemoveAllEvent.new(data, self)
+       raise_event(event)
+     when :PRESENCE_UPDATE
+       # Ignore friends list presences
+       return unless data['guild_id']
+
+       now_playing = data['game'].nil? ? nil : data['game']['name']
+       presence_user = @users[data['user']['id'].to_i]
+       played_before = presence_user.nil? ? nil : presence_user.game
+       update_presence(data)
+
+       event = if now_playing != played_before
+                 PlayingEvent.new(data, self)
+               else
+                 PresenceEvent.new(data, self)
+               end
+
+       raise_event(event)
+     when :VOICE_STATE_UPDATE
+       old_channel_id = update_voice_state(data)
+
+       event = VoiceStateUpdateEvent.new(data, old_channel_id, self)
+       raise_event(event)
+     when :VOICE_SERVER_UPDATE
+       update_voice_server(data)
+
+       # no event as this is irrelevant to users
+     when :CHANNEL_CREATE
+       create_channel(data)
+
+       event = ChannelCreateEvent.new(data, self)
+       raise_event(event)
+     when :CHANNEL_UPDATE
+       update_channel(data)
+
+       event = ChannelUpdateEvent.new(data, self)
+       raise_event(event)
+     when :CHANNEL_DELETE
+       delete_channel(data)
+
+       event = ChannelDeleteEvent.new(data, self)
+       raise_event(event)
+     when :CHANNEL_RECIPIENT_ADD
+       add_recipient(data)
+
+       event = ChannelRecipientAddEvent.new(data, self)
+       raise_event(event)
+     when :CHANNEL_RECIPIENT_REMOVE
+       remove_recipient(data)
+
+       event = ChannelRecipientRemoveEvent.new(data, self)
+       raise_event(event)
+     when :GUILD_MEMBER_ADD
+       add_guild_member(data)
+
+       event = ServerMemberAddEvent.new(data, self)
+       raise_event(event)
+     when :GUILD_MEMBER_UPDATE
+       update_guild_member(data)
+
+       event = ServerMemberUpdateEvent.new(data, self)
+       raise_event(event)
+     when :GUILD_MEMBER_REMOVE
+       delete_guild_member(data)
+
+       event = ServerMemberDeleteEvent.new(data, self)
+       raise_event(event)
+     when :GUILD_BAN_ADD
+       add_user_ban(data)
+
+       event = UserBanEvent.new(data, self)
+       raise_event(event)
+     when :GUILD_BAN_REMOVE
+       remove_user_ban(data)
+
+       event = UserUnbanEvent.new(data, self)
+       raise_event(event)
+     when :GUILD_ROLE_UPDATE
+       update_guild_role(data)
+
+       event = ServerRoleUpdateEvent.new(data, self)
+       raise_event(event)
+     when :GUILD_ROLE_CREATE
+       create_guild_role(data)
+
+       event = ServerRoleCreateEvent.new(data, self)
+       raise_event(event)
+     when :GUILD_ROLE_DELETE
+       delete_guild_role(data)
+
+       event = ServerRoleDeleteEvent.new(data, self)
+       raise_event(event)
+     when :GUILD_CREATE
+       create_guild(data)
+
+       # Check for false specifically (no data means the server has never been unavailable)
+       if data['unavailable'].is_a? FalseClass
+         @unavailable_servers -= 1 if @unavailable_servers
+         @unavailable_timeout_time = Time.now
+
+         notify_ready if @unavailable_servers.zero?
+
+         # Return here so the event doesn't get triggered
+         return
+       end
+
+       event = ServerCreateEvent.new(data, self)
+       raise_event(event)
+     when :GUILD_UPDATE
+       update_guild(data)
+
+       event = ServerUpdateEvent.new(data, self)
+       raise_event(event)
+     when :GUILD_DELETE
+       delete_guild(data)
+
+       if data['unavailable'].is_a? TrueClass
+         LOGGER.warn("Server #{data['id']} is unavailable due to an outage!")
+         return # Don't raise an event
+       end
+
+       event = ServerDeleteEvent.new(data, self)
+       raise_event(event)
+     when :GUILD_EMOJIS_UPDATE
+       server_id = data['guild_id'].to_i
+       server = @servers[server_id]
+       old_emoji_data = server.emoji.clone
+       update_guild_emoji(data)
+       new_emoji_data = server.emoji
+
+       created_ids = new_emoji_data.keys - old_emoji_data.keys
+       deleted_ids = old_emoji_data.keys - new_emoji_data.keys
+       updated_ids = old_emoji_data.select do |k, v|
+         new_emoji_data[k] && (v.name != new_emoji_data[k].name || v.roles != new_emoji_data[k].roles)
+       end.keys
+
+       event = ServerEmojiChangeEvent.new(server, data, self)
+       raise_event(event)
+
+       created_ids.each do |e|
+         event = ServerEmojiCreateEvent.new(server, new_emoji_data[e], self)
+         raise_event(event)
+       end
+
+       deleted_ids.each do |e|
+         event = ServerEmojiDeleteEvent.new(server, old_emoji_data[e], self)
+         raise_event(event)
+       end
+
+       updated_ids.each do |e|
+         event = ServerEmojiUpdateEvent.new(server, old_emoji_data[e], new_emoji_data[e], self)
+         raise_event(event)
+       end
+     when :WEBHOOKS_UPDATE
+       event = WebhookUpdateEvent.new(data, self)
+       raise_event(event)
+     else
+       # another event that we don't support yet
+       debug "Event #{type} has been received but is unsupported. Raising UnknownEvent"
+
+       event = UnknownEvent.new(type, data, self)
+       raise_event(event)
+     end
+
+     # The existence of this array is checked before for performance reasons, since this has to be done for *every*
+     # dispatch.
+     if @event_handlers && @event_handlers[RawEvent]
+       event = RawEvent.new(type, data, self)
+       raise_event(event)
+     end
+   rescue Exception => e
+     LOGGER.error('Gateway message error!')
+     log_exception(e)
+   end
+ end
+end
+end
+
+
 
 bot = nil
 
@@ -177,7 +526,6 @@ FIRST_GBOT_MESSAGE_HOLDER = {first_gbot_message_id: nil}
     end
   end
 
-  require 'discordrb'
 
 
 # listening_bot = Discordrb::Bot.new token: ENV['BOT_TOKEN']
