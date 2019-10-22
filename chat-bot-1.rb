@@ -1,7 +1,16 @@
 require 'ladder'
 require 'discordrb'
 
-
+class FalseClass
+  def false?
+    self == false
+  end
+end
+class TrueClass
+  def false?
+    self == false
+  end
+end
 
 module EZIIDiscordIntegration
   
@@ -30,7 +39,7 @@ module EZIIDiscordIntegration
 
   
 
-  def monkeypatching
+  def self.monkeypatching
     yield
   end
 
@@ -381,7 +390,7 @@ module EZIIDiscordIntegration
   }
 
 
-  def split_into_pipe_parts(message: '', pipe_unicode_symbol: '|')
+  def self.split_into_pipe_parts(message: '', pipe_unicode_symbol: '|')
     message.split('|')
   end
 
@@ -437,6 +446,26 @@ module EZIIDiscordIntegration
     self.timeframe_for_response = 200 # Second
   
   
+    def ALL_FALSE(*args)
+      args.all?(&:false?)
+    end
+    
+    def ALL_FALSE_INSPECT(*args)
+      args.each_slice(2).map { |boolean, explanation|
+        "#{explanation}: #{boolean}"
+      }.join(' <> ')
+    end
+    
+    
+    def pump_once(discord_listener, &block)
+      count = 0
+      self.pump(discord_listener) do
+        fail if count > 0
+        block.call
+        count += 1
+      end
+    end
+    
     def pump(discord_listener, &block)
       fail ERR_ID_2 if self.class.instance_variable_get(:@user_id_of_message_to_be_captured)[:gbot_id].nil?
     
@@ -446,28 +475,40 @@ module EZIIDiscordIntegration
       message = nil
       messages_by_gbot_in_timeframe = 0
       ladder do |message_data|
+        
+        puts message_data.inspect
     
-          next if message_data.nil?
-          fail ERR_ID_6 if FIRST_GBOT_MESSAGE_HOLDER[:first_gbot_message_id].nil?
-          next if message_data['id'] == FIRST_GBOT_MESSAGE_HOLDER[:first_gbot_message_id] # or fail ERR_ID_5
-      
+        puts ALL_FALSE_INSPECT(
+          message_data.nil?, "message_data.nil?",
+          FIRST_GBOT_MESSAGE_HOLDER[:first_gbot_message_id].nil?, "FIRST_GBOT_MESSAGE_HOLDER[:first_gbot_message_id].nil?",
+          message_data['id'] == FIRST_GBOT_MESSAGE_HOLDER[:first_gbot_message_id], "message_data['id'] == FIRST_GBOT_MESSAGE_HOLDER[:first_gbot_message_id]"
+        )
+          
+          
+        if ALL_FALSE(message_data.nil?, FIRST_GBOT_MESSAGE_HOLDER[:first_gbot_message_id].nil?, message_data['id'] == FIRST_GBOT_MESSAGE_HOLDER[:first_gbot_message_id])
+            fail ERR_ID_7 if message_data.nil?
+            fail ERR_ID_6 if FIRST_GBOT_MESSAGE_HOLDER[:first_gbot_message_id].nil?
+            fail ERR_ID_5 if message_data['id'] == FIRST_GBOT_MESSAGE_HOLDER[:first_gbot_message_id] # or fail ERR_ID_5
+    
           if message_data['author']['id'] == gbot_id
             messages_by_gbot_in_timeframe += 1
-        
+      
             message = message_data['content']
           end
-      
     
-        VIRTUAL_EXCEPTION[:shout] = ERR_ID_3 if message.nil?
-        # next if message.nil?
-        fail ERR_ID_4 if messages_by_gbot_in_timeframe > 1
     
-        @message = message
+          VIRTUAL_EXCEPTION[:shout] = ERR_ID_3 if message.nil?
+          # next if message.nil?
+          fail ERR_ID_4 if messages_by_gbot_in_timeframe > 1
     
-        DISCORD_MESSAGES.pop
+          @message = message
+    
+          DISCORD_MESSAGES.pop
       
+          puts "TEST TEST"
       
-        block.call
+          block.call
+        end
       end
     end
   
@@ -506,7 +547,10 @@ module EZIIDiscordIntegration
   
   
     def initialize
-      @bot = Discordrb::Bot.new token: ENV['BOT_TOKEN']
+      @bot = ::Discordrb::Bot.new token: ENV['BOT_TOKEN']
+      
+      self.add_pipeline_command
+      self.add_gbot_id_fetch_command
     end
   
     def get_gbot_message(event, callback)
@@ -514,7 +558,7 @@ module EZIIDiscordIntegration
       capture = GbotCommandResponseCapture.new(command)
   
       capture.command.send do
-        capture.pump(DISCORD_MESSAGES) do
+        capture.pump_once(DISCORD_MESSAGES) do
           callback.call(capture.response)
         end
       end
@@ -524,11 +568,11 @@ module EZIIDiscordIntegration
   
     def add_pipeline_command
       bot.message(with_text: 'pipeline:') do |event|
-        (event.respond("Please first initialize via !pipeline gbot-id-capture") && break) if USER_ID_HOLDER[:gbot_id].nil?
-
-
-            # return event.user.sname    
-          pipe_parts = split_into_pipe_parts(message: MESSAGE, pipe_unicode_symbol: '|')
+        if USER_ID_HOLDER[:gbot_id].nil?
+          event.respond("Please first initialize via !pipeline gbot-id-capture")
+        else
+          # return event.user.sname    
+          pipe_parts = EZIIDiscordIntegration.  split_into_pipe_parts(message: MESSAGE, pipe_unicode_symbol: '|')
 
           event.respond pipe_parts.inspect
 
@@ -538,9 +582,9 @@ module EZIIDiscordIntegration
           # event.respond(pipeline.inspect)
 
           pipeline.run { |message, left_commands_count|
-      
+    
             break if left_commands_count == 1
-      
+    
             event.respond("Commands to be run after this one: #{left_commands_count}, now running:")
 
             # command = CommandChooser.new(message).command
@@ -564,6 +608,7 @@ module EZIIDiscordIntegration
 
 
           }
+        end
       end
     end
   
@@ -604,8 +649,8 @@ module EZIIDiscordIntegration
                 m = DISCORD_MESSAGES.pop
           
                 fail ERR_ID_7 if m['id'] != data['id']
-                USER_ID_HOLDER[:gbot_id] = data['author']['id']
-                FIRST_GBOT_MESSAGE_HOLDER[:first_gbot_message_id] = data['id']
+                USER_ID_HOLDER[:gbot_id] ||= data['author']['id']
+                FIRST_GBOT_MESSAGE_HOLDER[:first_gbot_message_id] ||= data['id']
               end
             # end
           }
