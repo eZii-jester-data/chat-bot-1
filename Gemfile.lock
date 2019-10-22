@@ -1,11 +1,12 @@
 GIT
   remote: https://github.com/eZii-jester-data/ladder-gem.git
-  revision: 5360adaacd23549ef7cc8bdbcd43b48a5dce2d2f
+  revision: f387e0fd49f1a0dffea5488afc0366bba1c8b713
   specs:
-    ladder (5.test)
+    ladder (11.test)
 
 GEM
   specs:
+    byebug (11.0.1)
     discordrb (3.3.0)
       discordrb-webhooks (~> 3.3.0)
       ffi (>= 1.9.24)
@@ -47,8 +48,9 @@ PLATFORMS
   ruby
 
 DEPENDENCIES
+  byebug
   discordrb
-  ladder!
+  ladder (= 11.test)!
 
 BUNDLED WITH
    1.17.2
