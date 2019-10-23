@@ -12,6 +12,10 @@ class TrueClass
   end
 end
 
+
+class GBotResponseNotCapture < Exception
+end
+
 module EZIIDiscordIntegration
   
   TEST_COMMAND_STRING = "5 results for te123§§st"
@@ -24,9 +28,7 @@ module EZIIDiscordIntegration
 
   USER_ID_HOLDER = {gbot_id: nil}
   FIRST_GBOT_MESSAGE_HOLDER = {first_gbot_message_id: nil}
-  
-  DISCORD_MESSAGES = []
-  
+    
 
   ERR_ID_0 = "search string for gbot is not a string"# ,
   ERR_ID_1 = "respoonse not delivered within 1 second"# ,
@@ -386,20 +388,155 @@ module EZIIDiscordIntegration
   end
 
 
-  ladder { |data|
-    DISCORD_MESSAGES.push(data)
-  }
-
-
   def self.split_into_pipe_parts(message: '', pipe_unicode_symbol: '|')
     message.split('|')
   end
 
+  
+
+  class PipelineDiscordBot
+    CURL_RESPONSES_HOLDER = {}
+    
+    attr_reader :bot
+  
+  
+    def initialize
+      @bot = ::Discordrb::Bot.new token: ENV['BOT_TOKEN']
+      
+      self.add_pipeline_command
+      self.add_gbot_id_fetch_command
+    end
+  
+    def get_gbot_message(query, event, callback)
+      command = GbotCommandForBot2Bot.new(query, event)
+      capture = GbotCommandResponseCapture.new(command)
+  
+      capture.command.send do  
+        capture.pump_once do
+          if !capture.response.nil? && extract_urls_from_gbot_response(capture.response).any?
+            callback.call(capture.response) 
+          end
+        end
+      end
+    end
+  
+    def use(*args)
+      yield
+    end
+    
+    def where_the_use_would_fail(*args)
+      yield
+    end
+    
+    def §(*args)
+      yield if block_given?
+    end
+    
+    ESSENTIAL_DECLARATINO_OF_LOCAL_VARIABLE = [self, 0]
+  
+    def add_pipeline_command
+      bot.message(with_text: 'pipeline:') do |event|
+          
+        if USER_ID_HOLDER[:gbot_id].nil?
+          event.respond("Please first initialize via !pipeline gbot-id-capture")
+
+        else
+          
+          event.user.await(:pipeline_definition) do |pipeline_definition_message_event|                     
+                        
+          
+            user_message = pipeline_definition_message_event.message.content
+            
+          pipe_parts = EZIIDiscordIntegration.split_into_pipe_parts(message: MESSAGE.gsub('te123§§st', user_message), pipe_unicode_symbol: '|')
+
+          event.respond pipe_parts.inspect
+
+          pipeline = Pipeline.new
+          pipe_parts.each do |pipe_part| pipeline.add(pipe_part) end
+
+
+          
+          pipeline.run { |message, left_commands_count, new_output_value_callback, last_output_value_callback|
+    
+ 
+    
+            event.respond("Commands to be run after this one: #{left_commands_count}, now running:")
+
+            thread = lambda { |est| est.call }
+                      if message =~ /gbot/
+                            get_gbot_message(
+                              message.gsub('gbot:', ''), 
+                              event, 
+                              ->(response_message) do
+                                 new_output_value_callback.call(response_message)
+                               end)
+                  
+                    
+                     end 
+                
+                
+                      if message =~ /curl/
+                        CURL_RESPONSES_HOLDER[0] = lambda do |&block|
+                          last_output_value_callback.call do |value|
+                              block.call(prepare_curl_responses(value))
+                            end
+                          end
+                      end
+                  
+                    
+                   if message =~ /top/
+                     CURL_RESPONSES_HOLDER[0].call do |value|
+                        event.respond(value.wait_for_finish.winner)
+                      end  
+                    end
+                  
+          }
+        end
+        
+        end
+      end
+    end
+    
+    require_relative './lib/ezii_curl_manager.rb'
+    def prepare_curl_responses(gbot_message)
+      cm = CurlManager.new(     extract_urls_from_gbot_response(    gbot_message    )       )
+      
+      cm.start_calls_in_background
+      
+      
+      return cm
+    end
+    
+    
+    def extract_urls_from_gbot_response(gbot_message)
+      return gbot_message.scan(/<([^>]*)>/)
+    end
+  
+  
+    def add_gbot_id_fetch_command
+      bot.message(content: '!pipeline gbot-id-capture') do |event|
+        event.respond("Type start to begin")
+        event.user.await(:start) do |start_event|
+          event.respond('gbot: get-id')
+   
+          ladder { |data|
+              if(data['author']['username'] == 'GBot')
+                USER_ID_HOLDER[:gbot_id] ||= data['author']['id']
+                FIRST_GBOT_MESSAGE_HOLDER[:first_gbot_message_id] ||= data['id']
+                
+                event.respond('Google Bot Discord ID is ' + USER_ID_HOLDER[:gbot_id].inspect)
+              end
+          }
+        end
+      end
+    end
+  end
+
 
   class Pipeline
+    attr_accessor :block
     def initialize
       @queue = []
-      @outputs = []
     end
 
     def add(execute)
@@ -414,17 +551,17 @@ module EZIIDiscordIntegration
         last_item = yield(@queue.shift, @queue.size, new_output_value_callback, last_output_value_callback)
       end
     end
-    
-    
+  
+  
     def new_output_value_callback
-      return Proc.new do |new_value|
-        @outputs.push(new_value)
+      return Proc.new do |new_value|      
+        self.block.call(new_value)
       end
     end
-    
+  
     def last_output_value_callback
-      return Proc.new do
-        @outputs[-1]
+      return Proc.new do |&block|
+        self.block = block
       end
     end
 
@@ -436,7 +573,7 @@ module EZIIDiscordIntegration
       """
     end
   end  
-
+  
   module Pipeline::ExpectResponseWithin
     module ClassMethods
       def timeframe_for_response=(timeframe_in_seconds)
@@ -448,6 +585,8 @@ module EZIIDiscordIntegration
       end
     end
   end
+  
+  
   
   class GbotCommandResponseCapture
     attr_accessor :command
@@ -472,9 +611,9 @@ module EZIIDiscordIntegration
     end
     
     
-    def pump_once(discord_listener, &block)
+    def pump_once(&block)
       count = 0
-      self.pump(discord_listener) do
+      self.pump do
         @stop_ladder = true if count > 0 
         
         
@@ -487,7 +626,7 @@ module EZIIDiscordIntegration
       end
     end
     
-    def pump(discord_listener, &block)
+    def pump(&block)
       fail ERR_ID_2 if self.class.instance_variable_get(:@user_id_of_message_to_be_captured)[:gbot_id].nil?
     
     
@@ -518,14 +657,12 @@ module EZIIDiscordIntegration
           end
     
     
-          VIRTUAL_EXCEPTION[:shout] = ERR_ID_3 if message.nil?
+          fail ERR_ID_3 if message.nil?
           # next if message.nil?
           fail ERR_ID_4 if messages_by_gbot_in_timeframe > 1
     
           @message = message
-    
-          DISCORD_MESSAGES.pop
-      
+          
           puts "TEST TEST"
       
           block.call
@@ -545,7 +682,6 @@ module EZIIDiscordIntegration
     end
 
     def to_discord_message
-      # fail "ERR_CODE: 0" if @text.is_a?(String).false?
       "gbot: #{@text.to_s}"
     end
   
@@ -553,210 +689,13 @@ module EZIIDiscordIntegration
       @event.respond(self.to_discord_message)
     
     
-      while DISCORD_MESSAGES[-1]['content'] != self.to_discord_message
-        p DISCORD_MESSAGES.inspect
-        sleep 0.1 # simulate a slight delay, normally there would have to be an exact implementation to know when the message was shown in discord programatically
-      end
-      # maybe wait for DISCORD_MESSAGES to show this message?
-    
       yield
-    end
-  end
-
-  class PipelineDiscordBot
-    attr_reader :bot
-  
-  
-    def initialize
-      @bot = ::Discordrb::Bot.new token: ENV['BOT_TOKEN']
-      
-      self.add_pipeline_command
-      self.add_gbot_id_fetch_command
-    end
-  
-    def get_gbot_message(event, callback)
-      command = GbotCommandForBot2Bot.new(TEST_COMMAND_STRING, event)
-      capture = GbotCommandResponseCapture.new(command)
-  
-      capture.command.send do
-        capture.pump_once(DISCORD_MESSAGES) do
-          callback.call(capture.response)
-        end
-      end
-    end
-  
-    def use(*args)
-      yield
-    end
-    
-    def where_the_use_would_fail(*args)
-      yield
-    end
-    
-    def §(*args)
-      yield if block_given?
-    end
-    
-    ESSENTIAL_DECLARATINO_OF_LOCAL_VARIABLE = [self, 0]
-  
-    def add_pipeline_command
-      bot.message(with_text: 'pipeline:') do |event|
-
-          
-        if USER_ID_HOLDER[:gbot_id].nil?
-          event.respond("Please first initialize via !pipeline gbot-id-capture")
-        else
-          event.user.await(:pipeline_definition) do |pipeline_definition_message_event|
-          
-            user_message = pipeline_definition_message_event.message.content
-            
-          # return event.user.sname    
-          pipe_parts = EZIIDiscordIntegration.  split_into_pipe_parts(message: MESSAGE.gsub('te123§§st', user_message), pipe_unicode_symbol: '|')
-# 
-          event.respond pipe_parts.inspect
-
-          pipeline = Pipeline.new
-          pipe_parts.each do |pipe_part| pipeline.add(pipe_part) end
-
-          # event.respond(pipeline.inspect)
-
-            §(:start, ESSENTIAL_DECLARATINO_OF_LOCAL_VARIABLE, use: '123', where_the_use_would_fail: '1234')
-          curl_responses = nil
-            §(:end)
-          
-          pipeline.run { |message, left_commands_count, new_output_value_callback, last_output_value_callback|
-    
-            # break if left_commands_count == 1
-    
-            event.respond("Commands to be run after this one: #{left_commands_count}, now running:")
-
-            # command = CommandChooser.new(message).command
-
-            # command.timed do
-              # event.respond(message) # if command.bot_2_bot?
-
-
-              # if command.requires_gbot_answer_command?
-                  # until next_message_is_gbot_answer_limited_to_1_via_50_MILLISECOND_DEBOUNCE_INTO_THE_PAST_AND_FUTURE
-                  # https://github.com/meew0/discordrb/blob/master/examples/ping_with_respond_time.rb
-                  # begin
-                      get_gbot_message(event, ->(response_message) { new_output_value_callback.call(response_message) }) if message =~ /gbot/ # event.respond(response_message) 
-                  
-                      sleep 5 if message =~ /gbot/ # this must be changed to wait for gbot (in a exact fashion)
-                      
-                      
-                      puts (message =~ /curl/).to_s * 1000
-                
-                
-                      if message =~ /curl/
-                        use('123') do
-                          curl_responses = prepare_curl_responses(last_output_value_callback.call)
-                        end
-                      end
-                  
-                  
-                      puts (message =~ /top/).to_s * 1000
-                      
-                      # byebug
-                  
-                      # where thee use would fail
-                      where_the_use_would_fail('1234') do
-                        event.respond(curl_responses.wait_for_finish.winner) if message =~ /top/
-                      end
-                      
-                    # rescue
-                      # event.respond(VIRTUAL_EXCEPTION[:shout].to_s[0..20].to_s) # Shout
-                    # end
-                  # end
-              # end
-            # end
-
-
-
-          }
-        end
-        
-        end
-      end
-    end
-    
-    require_relative './lib/ezii_curl_manager.rb'
-    def prepare_curl_responses(gbot_message)
-      cm = CurlManager.new(     extract_urls_from_gbot_response(    gbot_message    )       )
-      
-      cm.start_calls_in_background
-      
-      
-      return cm
-    end
-    
-    
-    def extract_urls_from_gbot_response(gbot_message)
-      return gbot_message.scan(/<([^>]*)>/)
-    end
-  
-  
-    def add_gbot_id_fetch_command
-      bot.message(content: '!pipeline gbot-id-capture') do |event|
-        event.respond("Type start to begin")
-        event.user.await(:start) do |start_event|
-          event.respond('gbot: get-id')
-           #
-          # message = nil
-          # messages_by_gbot_in_timeframe = 0
-          # before_t = Time.now
-          # before = Time.now.to_i
-          #
-       
-          ladder { |data|
-            # unless discord_messages.include?(data)
-            #   discord_messages.push(data)
-            # end
-      
-      
-            # event.respond(data.inspect)
-      
-            # while (Time.now.to_i - before) < 10000
-            #   puts "test #{Time.now.to_i - before}"
-            #   message_data = discord_messages.pop
-            #
-            #   sleep 0.5
-            #
-            #
-            #   next if message_data.nil?
-            #
-            #
-              if(data['author']['username'] == 'GBot')
-                # event.respond(data.inspect)
-          
-                m = DISCORD_MESSAGES.pop
-          
-                fail ERR_ID_7 if m['id'] != data['id']
-                USER_ID_HOLDER[:gbot_id] ||= data['author']['id']
-                FIRST_GBOT_MESSAGE_HOLDER[:first_gbot_message_id] ||= data['id']
-                
-                event.respond('Google Bot Discord ID is ' + USER_ID_HOLDER[:gbot_id].inspect)
-              end
-            # end
-          }
-        end
-      end
     end
   end
 end
 
 
 
+  ladder {}
+
 EZIIDiscordIntegration::PipelineDiscordBot.new.bot.run
-
-
-
-# C_EXTENSION_SIGNATURE_FOR_THIS_IDEA = [:signing, 0]
-
-
-# def 🖊(*args)
-#   yield
-# end
-
-
-# 🖊(C_EXTENSION_SIGNATURE_FOR_THIS_IDEA: "https://github.com/tmm1/http_parser.rb/blob/master/ext/ruby_http_parser/ruby_http_parser.c#L211") do
