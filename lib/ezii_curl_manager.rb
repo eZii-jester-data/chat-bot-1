@@ -7,10 +7,16 @@ module EZIIDiscordIntegration
     
     def start_calls_in_background
       @website_urls.each do |url|
+        # tst = -> { `curl #{CGI.escape(url)} -s -o /dev/null -w  "%{time_starttransfer}\n"` }
+        #
+        # byebug
+        #
+        #
+        
         thread = Thread.new do
           # §(INSECURE)
           
-          @threads[thread] = [`curl #{url} -s -o /dev/null -w  "%{time_starttransfer}\n"`, url]
+          @threads[thread] = [`curl '#{url}' -s -o /dev/null -w  "%{time_starttransfer}\n"`, url]
         end
         
         @threads[thread] = nil
@@ -25,6 +31,7 @@ module EZIIDiscordIntegration
     
     def winner
       return @threads.values.min_by do |value|
+        fail ERR_ID_8 if !(value[0].to_f > 0)
         value[0].to_f
       end.inspect
     end

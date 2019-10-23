@@ -14,7 +14,7 @@ end
 
 module EZIIDiscordIntegration
   
-  TEST_COMMAND_STRING = "5 results for test"
+  TEST_COMMAND_STRING = "5 results for te123§§st"
   MESSAGE = "gbot: #{TEST_COMMAND_STRING} | filter by curl response time | top 1"
   
   
@@ -36,6 +36,7 @@ module EZIIDiscordIntegration
   ERR_ID_5 = "ID of all following gbot messages must not equal the id of the first gbot message"
   ERR_ID_6 = "ID of first gbot message received by this program must not be nil"
   ERR_ID_7 = "DISCORD_MESSAGES must be synced globally"
+  ERR_ID_8 = "Curl not working dum dum"
 
   
 
@@ -600,12 +601,18 @@ module EZIIDiscordIntegration
   
     def add_pipeline_command
       bot.message(with_text: 'pipeline:') do |event|
+
+          
         if USER_ID_HOLDER[:gbot_id].nil?
           event.respond("Please first initialize via !pipeline gbot-id-capture")
         else
+          event.user.await(:pipeline_definition) do |pipeline_definition_message_event|
+          
+            user_message = pipeline_definition_message_event.message.content
+            
           # return event.user.sname    
-          pipe_parts = EZIIDiscordIntegration.  split_into_pipe_parts(message: MESSAGE, pipe_unicode_symbol: '|')
-
+          pipe_parts = EZIIDiscordIntegration.  split_into_pipe_parts(message: MESSAGE.gsub('te123§§st', user_message), pipe_unicode_symbol: '|')
+# 
           event.respond pipe_parts.inspect
 
           pipeline = Pipeline.new
@@ -667,6 +674,8 @@ module EZIIDiscordIntegration
 
 
           }
+        end
+        
         end
       end
     end
