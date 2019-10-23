@@ -15,7 +15,7 @@ end
 module EZIIDiscordIntegration
   
   TEST_COMMAND_STRING = "5 results for test"
-  MESSAGE = "gbot: #{TEST_COMMAND_STRING} | filter by google page speed score | top 1"
+  MESSAGE = "gbot: #{TEST_COMMAND_STRING} | filter by curl response time | top 1"
   
   
   VIRTUAL_EXCEPTION = {}
@@ -398,6 +398,7 @@ module EZIIDiscordIntegration
   class Pipeline
     def initialize
       @queue = []
+      @outputs = []
     end
 
     def add(execute)
@@ -409,7 +410,20 @@ module EZIIDiscordIntegration
     def run
       last_item = nil
       while @queue.any?
-        last_item = yield(@queue.shift, @queue.size)
+        last_item = yield(@queue.shift, @queue.size, new_output_value_callback, last_output_value_callback)
+      end
+    end
+    
+    
+    def new_output_value_callback
+      return Proc.new do |new_value|
+        @outputs.push(new_value)
+      end
+    end
+    
+    def last_output_value_callback
+      return Proc.new do
+        @outputs[-1]
       end
     end
 
@@ -587,9 +601,15 @@ module EZIIDiscordIntegration
 
           # event.respond(pipeline.inspect)
 
-          pipeline.run { |message, left_commands_count|
+          §(ESSENTIAL_DECLARATINO_OF_LOCAL_VARIABLE, use: '123', where_the_use_would_fail: '1234') # do |use|
+              # use do
+   #            end
+            
+            curl_responses = nil
+          end
+          pipeline.run { |message, left_commands_count, new_output_value_callback, last_output_value_callback|
     
-            break if left_commands_count == 1
+            # break if left_commands_count == 1
     
             event.respond("Commands to be run after this one: #{left_commands_count}, now running:")
 
@@ -603,7 +623,30 @@ module EZIIDiscordIntegration
                   # until next_message_is_gbot_answer_limited_to_1_via_50_MILLISECOND_DEBOUNCE_INTO_THE_PAST_AND_FUTURE
                   # https://github.com/meew0/discordrb/blob/master/examples/ping_with_respond_time.rb
                   # begin
-                      get_gbot_message(event, ->(response_message) { event.respond(response_message) }) # event.respond(response_message) 
+                      get_gbot_message(event, ->(response_message) { new_output_value_callback.call(response_message) }) if message =~ /gbot/ # event.respond(response_message) 
+                  
+                      sleep 5 if message =~ /gbot/ # this must be changed to wait for gbot (in a exact fashion)
+                      
+                      
+                      puts (message =~ /curl/).to_s * 1000
+                
+                
+                      if message =~ /curl/
+                        use('123') do
+                          curl_responses = prepare_curl_responses(last_output_value_callback.call)
+                        end
+                      end
+                  
+                  
+                      puts (message =~ /top/).to_s * 1000
+                      
+                      byebug
+                  
+                      # where thee use would fail
+                      where_the_use_would_fail('1234') do
+                        event.respond(curl_responses.wait_for_finish.winner) if message =~ /top/
+                      end
+                      
                     # rescue
                       # event.respond(VIRTUAL_EXCEPTION[:shout].to_s[0..20].to_s) # Shout
                     # end
@@ -616,6 +659,16 @@ module EZIIDiscordIntegration
           }
         end
       end
+    end
+    
+    require_relative './lib/ezii_curl_manager.rb'
+    def prepare_curl_responses(gbot_message)
+      return CurlManager.new(     extract_urls_from_gbot_response(    gbot_message    )       )
+    end
+    
+    
+    def extract_urls_from_gbot_response(gbot_message)
+      return gbot_message
     end
   
   
@@ -657,6 +710,8 @@ module EZIIDiscordIntegration
                 fail ERR_ID_7 if m['id'] != data['id']
                 USER_ID_HOLDER[:gbot_id] ||= data['author']['id']
                 FIRST_GBOT_MESSAGE_HOLDER[:first_gbot_message_id] ||= data['id']
+                
+                event.respond('Google Bot Discord ID is ' + USER_ID_HOLDER[:gbot_id].inspect)
               end
             # end
           }
