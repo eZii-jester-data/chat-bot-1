@@ -650,7 +650,7 @@ module EZIIDiscordIntegration
                   
                       puts (message =~ /top/).to_s * 1000
                       
-                      byebug
+                      # byebug
                   
                       # where thee use would fail
                       where_the_use_would_fail('1234') do
@@ -673,12 +673,17 @@ module EZIIDiscordIntegration
     
     require_relative './lib/ezii_curl_manager.rb'
     def prepare_curl_responses(gbot_message)
-      return CurlManager.new(     extract_urls_from_gbot_response(    gbot_message    )       )
+      cm = CurlManager.new(     extract_urls_from_gbot_response(    gbot_message    )       )
+      
+      cm.start_calls_in_background
+      
+      
+      return cm
     end
     
     
     def extract_urls_from_gbot_response(gbot_message)
-      return gbot_message
+      return gbot_message.scan(/<([^>]*)>/)
     end
   
   
