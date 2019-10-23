@@ -584,7 +584,19 @@ module EZIIDiscordIntegration
       end
     end
   
-  
+    def use(*args)
+      yield
+    end
+    
+    def where_the_use_would_fail(*args)
+      yield
+    end
+    
+    def §(*args)
+      yield if block_given?
+    end
+    
+    ESSENTIAL_DECLARATINO_OF_LOCAL_VARIABLE = [self, 0]
   
     def add_pipeline_command
       bot.message(with_text: 'pipeline:') do |event|
@@ -601,12 +613,10 @@ module EZIIDiscordIntegration
 
           # event.respond(pipeline.inspect)
 
-          §(ESSENTIAL_DECLARATINO_OF_LOCAL_VARIABLE, use: '123', where_the_use_would_fail: '1234') # do |use|
-              # use do
-   #            end
-            
-            curl_responses = nil
-          end
+            §(:start, ESSENTIAL_DECLARATINO_OF_LOCAL_VARIABLE, use: '123', where_the_use_would_fail: '1234')
+          curl_responses = nil
+            §(:end)
+          
           pipeline.run { |message, left_commands_count, new_output_value_callback, last_output_value_callback|
     
             # break if left_commands_count == 1
